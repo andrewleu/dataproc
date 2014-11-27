@@ -1,0 +1,4 @@
+/home/rsync/chinacache_20121210225531.xlsx
+/home/rsync/chinacache_20121231133216.xlsx
+/home/rsync/chinacache_20121217112914.xlsx
+/home/rsync/chinacache_20121228154636.xlsx
