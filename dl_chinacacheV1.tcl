@@ -1,23 +1,20 @@
 package require mysqltcl
 global mysqlstatus
- 
 set port {3306}
+#set host {172.24.20.68}
 set host {127.0.0.1}
 set purpose "chinacache"
 set user {ipv6bgp}
 set password {ipv6}
 set dbname {data}
 set dltbl "dlfiles"
+set unzipfile "./ungz.txt"
 #set unzipfile /home/rsync/dltemp
-set insertfile /home/mysql/data/dltemp1
+set insertfile /home/dltemp1
 #have to be this dir
 cd /home/rsync/files
 set flist [lsort [glob $purpose*]]
- 
-
-
 #start time
- 
 set mysql_handler [mysqlconnect -host $host -port $port -user $user -password $password]
 mysqluse $mysql_handler $dbname
 mysqlexec $mysql_handler "set names 'utf8'"
@@ -26,30 +23,61 @@ set lastfile [mysqlsel $mysql_handler "select id, filename from $dltbl where id 
 set lastfile [lindex $lastfile 0 1]
 set n_file [lsearch $flist $lastfile]
 incr n_file
- 
+set zipped 0 
 #set files [glob sohu*]
-while { [set read_file [lindex $flist $n_file]]!=""} {
-   #set read_file "chinacache_20130501205026.txt"
-   puts $read_file
-   set fp [open $read_file r]
+while { [set read_file [lindex $flist $n_file]] != "" } {
+   #set read_file "chinacache_20130501205026.txt" # to handle gziped file
+ set morefiles 0
+ if {[string match *gz $read_file]!= 0 } {  #only a gzip file
+            exec gzip -dc $read_file > $unzipfile
+            set fp [open $unzipfile r]
+            set orig_name $read_file
+            set read_file $unzipfile
+            set zipped 1
+ } else {  #a gzip file without gz postfix 
+     set postfix [lindex [split $read_file "."] 1]
+     set postfix [string range $postfix 0 9]
+     exec cat $read_file > cc.gz
+     incr n_file
+     while {[set tempfilename [lindex $flist $n_file]]!=""} { 
+       # the file is splitted into parts
+       if {[string first  $postfix $tempfilename  ]!=-1 } {
+              exec cat $tempfilename >> cc.gz
+              incr n_file
+              puts "$tempfilename , more";
+              set lastpart $tempfilename
+              set morefiles 1; #more files follow the first one with 'aa'
+       } else  {
+             incr n_file -1
+             break
+       }
+     }
+     if { [catch {exec zcat cc.gz  > $unzipfile } out]==0 } {
+            set  fp [open $unzipfile r] ;unzipped file 
+            set orig_name $read_file
+            set read_file $unzipfile
+            set zipped 1; puts $unzipfile
+       } else {  
+            puts $out; plain txt
+            set fp [open "cc.gz" r]
+            set zipped 0
+       }
+   }
+   #puts $read_file
+   #set fp [open $read_file r]
    set tf [open $insertfile w]
-   fconfigure $fp -encoding gb2312
+   fconfigure $fp -encoding utf-8; #fconfigure $tf -encoding utf-8
    #fconfigure $fp -encoding gb2312
- 
    set line  0
- 
-            # next line edition
- 
    while {[eof $fp] != 1} {
          gets $fp msg
          if {$line==0} {
           puts $msg
          }
          if { [string length $msg] > 30} { 
-
             set num 0
             set count 0
-            
+            set msg [string map {"\t" ","} $msg]
             set chrct [string index $msg $num]
             while { $chrct!=""&& $count<6} {
               if { $chrct ==","} {
@@ -81,7 +109,7 @@ while { [set read_file [lindex $flist $n_file]]!=""} {
             }  {
                      set status "i"
            } else {set status "o"}
-              set msg "$msg$part1,$part2,$purpose,$status,$partition_col,$day"
+              set msg "$msg$part1,$part2,$purpose,$status,$partition_col,$day,$orig_name"
       #      set msg [lappend msg $strtail]
            
             puts $tf $msg
@@ -93,14 +121,18 @@ while { [set read_file [lindex $flist $n_file]]!=""} {
   close $tf
   set init_time [clock seconds]
   set init_time [clock format $init_time -format  {%Y-%m-%d %H:%M:%S}]
-  if  { [ catch {mysqlexec $mysql_handler "load data  infile '$insertfile'into table download Fields Terminated By ',' ( ipaddr,  addr, addr_2, addr_3, agency,date, max, avi, purpose, status,YM,day)" } error] } {
+  if  { [ catch {mysqlexec $mysql_handler "load data local infile '$insertfile'into table download Fields Terminated By ',' ( ipaddr,  addr, addr_2, addr_3, agency,date, max, avi, purpose, status,YM,day)" } error] } {
     puts "open $read_file with $error"
   } else {
  # mysql 5.5 will not work with 'local' option
+  if {$zipped==1} {
+   set read_file $orig_name
+  } ;# store the original reading file name and replace the unzipped file name.
   mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime,`lines`) values ('$read_file','$init_time', now(),'$line')"
 }
 incr n_file
-    
+  if {$morefile !=0 } {
+      mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime,`lines`) values ('$lastprt','$init_time', now(),'$line')" } 
 }
  
 mysqlclose $mysql_handler
