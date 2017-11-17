@@ -1,12 +1,16 @@
 package require mysqltcl
 global mysqlstatus
 set port {3306}
+#set host {172.24.20.68}
 set host {127.0.0.1}
 set user {ipv6bgp}
 set password {ipv6}
 set dbname {data}
 cd /home/rsync/files/
-set flist [lsort [glob qihu*]]
+if {[catch { set flist [lsort [glob qihu*]]} error ]} {
+  puts $error
+  exit 1
+}
 set purpose "qihu"
 
 
@@ -15,7 +19,8 @@ set purpose "qihu"
 set mysql_handler [mysqlconnect -host $host -port $port -user $user -password $password]
 mysqlexec $mysql_handler "set names 'utf8'"
 mysqluse $mysql_handler $dbname
-set lastfile [mysqlsel $mysql_handler "select id, filename from dlfiles where id = (select max(id) from dlfiles where filename like 'qihu%')" -list]
+set lastfile [mysqlsel $mysql_handler "select id, filename, entry_num from dlfiles where id = (select max(id) from dlfiles where filename like 'qihu%')" -list]
+set prv_entry [lindex $lastfile 0 2]
 set lastfile [lindex $lastfile 0 1]
 set n_file [lsearch $flist $lastfile]
 incr n_file
@@ -34,12 +39,12 @@ while { [set read_file [lindex $flist $n_file]]!=""} {
             set location [string map {"," " "} $msg]  
             if { [lindex $location 6] != "" } {
                  set frgn 0 ;# for foreign 
-                 set insertfile "/home/mysql/data/qhtemp"
+                 set insertfile "/home/qhtemp"
                  set tf [open $insertfile w]
            
                  } else {
                  set frgn 1 ;# for domestic
-                 set insertfile "/home/mysql/data/qhfrgntemp"
+                 set insertfile "/home/qhfrgntemp"
                  set tf [open $insertfile w]
         }
         puts $frgn
@@ -59,7 +64,7 @@ while { [set read_file [lindex $flist $n_file]]!=""} {
            }  else {set status "o"}
           # end of hour identification
               #lappend msg ",$purpose,$status,$partition_col"
-              set msg "$msg,qihu,$status,$partition_col,$day"
+              set msg "$msg,qihu,$status,$partition_col,$day,$read_file"
              puts $tf $msg
              if {[expr {$line%200000}] == 0 } {puts $line; puts $msg }
              incr line
@@ -80,16 +85,19 @@ while { [set read_file [lindex $flist $n_file]]!=""} {
        set init_time [clock format $init_time -format  {%Y-%m-%d %H:%M:%S}]
     if { $frgn != "na" } {
          if { $frgn ==0 } { 
-          if { [catch {mysqlexec $mysql_handler "load data  infile '$insertfile' into table download Fields Terminated By ',' ( ipaddr,  addr, addr_2, addr_3, agency,date, max, avi, purpose, status,YM,day)"}  error ]}  {
+          if { [catch {mysqlexec $mysql_handler "load data local infile '$insertfile' into table download Fields Terminated By ',' ( ipaddr,  addr, addr_2, addr_3, agency,date, max, avi, purpose, status,YM,day)"}  error ]}  {
            puts "open $read_file with $error" 
       } else {
-       mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime,`lines`) values ('$read_file','$init_time', now(),$line)" }
+       set entry_num [mysqlsel $mysql_handler "select max(id) from download" -list] 
+      # where purpose='qihu' and id>=$prv_entry" -list]
+       mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime,`lines`, entry_num) values ('$read_file','$init_time', now(),$line,$entry_num)" }
        incr n_file
       }
       if {$frgn  ==1 } {
-         catch { mysqlexec $mysql_handler "load data  infile '$insertfile' into table download_foreign Fields Terminated By ',' (ipaddr,addr,date,max,avi,purpose)" } error
-        mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime, `lines`) values ('$read_file','$init_time', now(),$line)"
-       incr n_file
+         catch { mysqlexec $mysql_handler "load data local infile '$insertfile' into table download_foreign Fields Terminated By ',' (ipaddr,addr,date,max,avi,purpose)" } error
+        set entry_num [mysqlsel $mysql_handler "select max(id) from download " -list]
+        mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime, `lines`,entry_num) values ('$read_file','$init_time', now(),$line,$entry_num)"
+        incr n_file
       }
   }    
 } 

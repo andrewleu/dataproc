@@ -9,7 +9,10 @@ set ipinfo {ipinformation}
 set unzipfile /home/rsync/shtemp
 set insertfile /var/lib/mysql/data/shtemp1
 cd /home/rsync/files
-set flist [lsort [glob sohu*]]
+if { [catch {set flist [lsort [glob sohu*]]} error] } {
+    puts $error
+    exit 1
+}
 set init_time [clock seconds]
 set init_time [clock format $init_time -format  {%Y-%m-%d %H:%M:%S}]
 # start time

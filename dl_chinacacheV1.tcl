@@ -19,48 +19,83 @@ set mysql_handler [mysqlconnect -host $host -port $port -user $user -password $p
 mysqluse $mysql_handler $dbname
 mysqlexec $mysql_handler "set names 'utf8'"
 set var '$purpose%'
-set lastfile [mysqlsel $mysql_handler "select id, filename from $dltbl where id = (select max(id) from $dltbl where filename like $var)" -list]
+set lastfile [mysqlsel $mysql_handler "select id, filename,entry_num from $dltbl where id = (select max(id) from $dltbl where filename like $var)" -list]
+set prv_entry [lindex $lastfile 0 2]
 set lastfile [lindex $lastfile 0 1]
 set n_file [lsearch $flist $lastfile]
 incr n_file
 set zipped 0 
+
 #set files [glob sohu*]
 while { [set read_file [lindex $flist $n_file]] != "" } {
    #set read_file "chinacache_20130501205026.txt" # to handle gziped file
  set morefiles 0
- if {[string match *gz $read_file]!= 0 } {  #only a gzip file
-            exec gzip -dc $read_file > $unzipfile
+ set out ""
+ set pflist ""
+ if {[string match *gz $read_file]!= 0 } {  ;#only a gzip file 
+     if {[catch  {exec gzip -dc $read_file > $unzipfile} out]==0} { 
             set fp [open $unzipfile r]
             set orig_name $read_file
             set read_file $unzipfile
-            set zipped 1
+            set zipped 1 } ;#one gzip file
  } else {  #a gzip file without gz postfix 
-     set postfix [lindex [split $read_file "."] 1]
-     set postfix [string range $postfix 0 9]
-     exec cat $read_file > cc.gz
-     incr n_file
-     while {[set tempfilename [lindex $flist $n_file]]!=""} { 
-       # the file is splitted into parts
-       if {[string first  $postfix $tempfilename  ]!=-1 } {
-              exec cat $tempfilename >> cc.gz
-              incr n_file
-              puts "$tempfilename , more";
-              set lastpart $tempfilename
-              set morefiles 1; #more files follow the first one with 'aa'
-       } else  {
-             incr n_file -1
-             break
+ 	   #previous post fix for duplicated file checking
+       set postfix [lindex [split $read_file "."] 1] ;# splitted parts have same postfix 
+       set pf_bundle [string range $postfix 0 9]; # a file bundles  aa ab ac ad...
+       lappend pflist $postfix ;# first item in the list of the postfix 
+       exec cat $read_file > cc.gz
+       incr n_file
+       while {[set tempfilename [lindex $flist $n_file]]!=""} {
+       	set postfix [lindex [split $tempfilename "."] 1]
+       	if {[string first  $pf_bundle $tempfilename  ]!=-1 } { 
+        #same day files
+     	   if {[lsearch -exact $pflist $postfix  ]==-1 } {
+           #duplicated file will have same post fix  
+     	     set postfix [lindex [split $tempfilename "."] 1]
+             # the file is splitted into parts
+             #the postfix not in the list 
+       	     lappend pflist $postfix
+             # a new file add the postfix into the list 
+       	     exec cat $tempfilename >> cc.gz  ; #restore the gz file
+             incr n_file                      
+             puts "$tempfilename , more";    
+             set lastpart $tempfilename
+             set morefiles 1; #more files follow the first
+           } else {
+       	      incr n_file
+              set lastpart  $tempfilename
+       	      puts "omitting, $tempfilename"
+           }
+       
+         #	  set pf_followed [lindex [split $tempfilename "."]]
+         #	  if {$pf_followed== $postfix_full} {
+         #	  	 exec del $tempfilename
+         #	  	 incr n_file
+         #	  	 continue
+         #	  } else {
+         #	  	  set postfix_full pf_followed
+         #       exec cat $tempfilename >> cc.gz  ; #restore the gz file
+         #       incr n_file                      
+         #       puts "$tempfilename , more";    
+         #       set lastpart $tempfilename
+         #       set morefiles 1; #more files follow the first one with 'aa'
+         #   }
+        } else  {
+           break
+        }
        }
-     }
      if { [catch {exec zcat cc.gz  > $unzipfile } out]==0 } {
-            set  fp [open $unzipfile r] ;unzipped file 
+            set  fp [open $unzipfile r] ; #unzipped file 
             set orig_name $read_file
             set read_file $unzipfile
             set zipped 1; puts $unzipfile
-       } else {  
-            puts $out; plain txt
-            set fp [open "cc.gz" r]
-            set zipped 0
+       } else {
+            puts "zip error"  
+            puts $out;# plain txt
+            #set fp [open "cc.gz" r]
+            #set zipped 0
+            #incr n_file 
+            continue
        }
    }
    #puts $read_file
@@ -114,7 +149,7 @@ while { [set read_file [lindex $flist $n_file]] != "" } {
            
             puts $tf $msg
             incr line
-            if {[expr {$line % 200000}] == 0} {puts $line; puts $msg}
+            if {[expr {$line % 500000}] == 0} {puts $line; puts $msg}
           }
    } 
   close $fp
@@ -125,15 +160,18 @@ while { [set read_file [lindex $flist $n_file]] != "" } {
     puts "open $read_file with $error"
   } else {
  # mysql 5.5 will not work with 'local' option
+  set entry_num [mysqlsel $mysql_handler "select max(id) from download" -list]
+  # where purpose='chinacache' and ym=$partition_col and day=$day and id>$prv_entry" -list]
   if {$zipped==1} {
    set read_file $orig_name
   } ;# store the original reading file name and replace the unzipped file name.
-  mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime,`lines`) values ('$read_file','$init_time', now(),'$line')"
+  mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime,`lines`, entry_num) values ('$read_file','$init_time', now(),'$line','$entry_num')"
 }
 incr n_file
-  if {$morefile !=0 } {
-      mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime,`lines`) values ('$lastprt','$init_time', now(),'$line')" } 
+  if {$morefiles !=0 } {
+      mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime,`lines`,entry_num) values ('$lastpart','$init_time', now(),'$line','$entry_num')" ; set morefiles 0} 
 }
  
 mysqlclose $mysql_handler
+
 

@@ -2,6 +2,7 @@
 package require mysqltcl
 global mysqlstatus
 set port {3306}
+#set host {172.24.20.68}
 set host {127.0.0.1}
 set purpose "ku6"
 set user {ipv6bgp}
@@ -9,7 +10,7 @@ set password {ipv6}
 set dbname {data}
 set dltbl "dlfiles"
 #set unzipfile /home/rsync/dltemp
-set insertfile /home/mysql/data/tempku6
+set insertfile /home/tempku6
 #have to be this dir
 cd /home/rsync/files
 set flist [lsort [glob $purpose*]]
@@ -45,7 +46,7 @@ while { [set read_file [lindex $flist $n_file]]!=""} {
    set lines [lindex $lines 0] 
    set init_time [clock seconds]
    set init_time [clock format $init_time -format  {%Y-%m-%d %H:%M:%S}]
-   set error_code [catch { set result [mysqlexec $mysql_handler "load data  infile '$insertfile' 
+   set error_code [catch { set result [mysqlexec $mysql_handler "load data local infile '$insertfile' 
       into table streaming Fields Terminated By ',' ( name,ipaddr,  province,city,county, carrier, timestamp, os, term,software, `s_rate`,`s_duration`, watching,download, buffer, `buffer_duration`)"]} msg]
    if {$error_code} {
        puts $msg; puts $lines; set lines 0;
@@ -59,23 +60,28 @@ while { [set read_file [lindex $flist $n_file]]!=""} {
    incr n_file
   if {$lines !=0} {
    set ymd [mysqlsel $mysql_handler "select distinct left(timestamp, 8) 
-      from streaming where YM=0" -list] 
+      from streaming where YM=0 and name<>'Tencent'" -list] 
    set len [llength $ymd]
    set i 0
-   while { $i < $len} {
-      set word [lindex $ymd  $i]
-      set YM [string range $word 0 5]
-      set day [string range $word 6 7]
-      mysqlexec $mysql_handler "update streaming set YM=$YM, day=$day where timestamp
-          like '$word%' and YM=0"
-      mysqlexec $mysql_handler "update streaming set status='b' where 
-          substring(timestamp,9,2) in (19,20,21,22)  and YM=$YM and day=$day and status='n'"
-      mysqlexec $mysql_handler "update streaming set status='i' where 
-          substring(timestamp,9,2) in (01,02,03,04,05) and YM=$YM and day=$day and status='n'"
-      mysqlexec $mysql_handler "update streaming set status='o' where
-           YM=$YM and day=$day and status='n'"
-      incr i
-   }
+   #while { $i < $len} {
+   #   set word [lindex $ymd  $i]; 
+   #   if  {[string range $word 0 0] != "2" } {
+   #       puts $word;
+   #       incr i
+   #       continue } 
+   #   #for some data may be wrong in column 'timestamp'
+   #   set YM [string range $word 0 5]
+   #   set day [string range $word 6 7] 
+   #   mysqlexec $mysql_handler "update streaming set YM=$YM, day=$day where status='n'
+   #     and timestamp like '$word%' and YM=0 and name<> 'Tencent'"
+   #   mysqlexec $mysql_handler "update streaming set status='b' where 
+   #       substring(timestamp,9,2) in (19,20,21,22)  and YM=$YM and day=$day and status='n'"
+   #   mysqlexec $mysql_handler "update streaming set status='i' where 
+   #       substring(timestamp,9,2) in (01,02,03,04,05) and YM=$YM and day=$day and status='n'"
+   #   mysqlexec $mysql_handler "update streaming set status='o' where
+   #        YM=$YM and day=$day and status='n'"
+   #   incr i
+   #}
  }
 }
 

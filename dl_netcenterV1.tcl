@@ -2,6 +2,7 @@ package require mysqltcl
 global mysqlstatus
 
 set port {3306}
+#set host {172.24.20.68}
 set host {127.0.0.1}
 set purpose "netcenter"
 set user {ipv6bgp}
@@ -9,15 +10,20 @@ set password {ipv6}
 set dbname {data}
 set dltbl {dlfiles}
 set unzipfile /home/rsync/nctemp
-set insertfile /home/mysql/data/dltemp2
+set insertfile /home/dltemp2
 #have to be this dir
 cd /home/rsync/files/
-set flist [lsort [glob $purpose*]]
+if {[catch {set flist [lsort [glob $purpose*]]} error]} {
+   puts $error
+   exit 1
+}
+
 set mysql_handler [mysqlconnect -host $host -port $port -user $user -password $password]
 mysqluse $mysql_handler $dbname
 mysqlexec $mysql_handler "set names 'utf8'"
 set var '$purpose%'
-set lastfile [mysqlsel $mysql_handler "select id, filename from $dltbl where id = (select max(id) from $dltbl where filename like $var)" -list]
+set lastfile [mysqlsel $mysql_handler "select id, filename,entry_num from $dltbl where id = (select max(id) from $dltbl where filename like $var)" -list]
+set prv_entry [lindex $lastfile 0 2]
 set lastfile [lindex $lastfile 0 1]
 set n_file [lsearch $flist $lastfile]
 incr n_file
@@ -77,11 +83,10 @@ while { [set read_file [lindex $flist $n_file]]!=""} {
            }
            set nodata 0 
            if { [string length $msg] <20 } {continue }
-           set msg [string map { "\u7f51\u5bbf," ""} $msg]
+           #set msg [string map { "网宿" # #\u7f51\u5bbf," ""} $msg]
            set msg [string map { " " "_"} $msg]
-
-            # puts "2"
            set partition_col [string map {"," " "} $msg]
+           set partition_col [lrange $partition_col 1 8]
            set partition_col [lindex $partition_col 5] 
            set hours [string rang $partition_col 8 9]
            set day [string range $partition_col 6 7]
@@ -93,7 +98,7 @@ while { [set read_file [lindex $flist $n_file]]!=""} {
            }  {
                      set status "i"
            } else {set status "o"}
-            lappend msg ",$purpose,$status,$partition_col,$day"
+            lappend msg ",$purpose,$status,$partition_col,$day,$tempfilename"
             set msg [string map { " " ""} $msg]
             #puts "replace"
       #      set msg [lappend msg $strtail]
@@ -112,12 +117,14 @@ while { [set read_file [lindex $flist $n_file]]!=""} {
     }
     set init_time [clock seconds]
     set init_time [clock format $init_time -format  {%Y-%m-%d %H:%M:%S}]
-    if  {[catch {   mysqlexec $mysql_handler "load data  infile '$insertfile'into table download Fields Terminated By ',' ( ipaddr,  addr, addr_2, addr_3, agency,date, max, avi, purpose, status,YM,day)" } error ]}  {
+    if  {[catch {   mysqlexec $mysql_handler "load data local infile '$insertfile'into table download Fields Terminated By ',' ( ipaddr,  addr, addr_2, addr_3, agency,date, max, avi, purpose, status,YM,day)" } error ]}  {
       puts $error
    } else { 
        # mysql 5.5 will not work with 'local' option
+       set entry_num [mysqlsel $mysql_handler "select max(id) from download " -list]
+          # where purpose='netcenter' and YM=$ym and day=$day and id>$prv_entry" -list]
        set read_file $tempfilename
-       mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime,`lines`) values ('$read_file','$init_time', now(),'$line')"
+       mysqlexec $mysql_handler "insert into dlfiles (filename, starttime, endtime,`lines`, entry_num) values ('$read_file','$init_time', now(),'$line','$entry_num)"
    }
 
        incr n_file
